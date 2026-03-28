@@ -30,7 +30,7 @@ erDiagram
         string attestation_status "PENDING | COMPLETED"
         list metadata_urls "GCS Signed URLs"
         map payload "Dynamic Dict for use-case"
-        list approvals "JSON list of {approver_group, approver_user, updated_on}"
+        list approvals "JSON list of {approver_group, definition_role, approver_user, updated_on}"
     }
 ```
 
@@ -42,7 +42,7 @@ erDiagram
 - **ArrayUnion Updates:** Image evidence URL additions (`metadata_urls`) use atomic `ArrayUnion` operations so that simultaneous uploads by multiple clients never overwrite each other.
 
 ### 2. State Syncing
-- Once all unique `approver_group` entries match the `required_approvers` prescribed in the Definitions schema, the transaction atomically transitions the Execution state (`attestation_status`) to `COMPLETED`.
+- Once all unique `definition_role` entries from the approvals match the `required_approvers` prescribed in the Definitions schema, the transaction atomically transitions the Execution state (`attestation_status`) to `COMPLETED`. This decouples the actual Azure/GCP Group (`approver_group`) from the required definition block (`definition_role`), allowing frontends to dynamically translate roles to explicit groups.
 - The parent (`central_attestations`) status, `last_attested`, and structurally calculated `next_cycle_due` (monthly/quarterly/yearly base calculation) are dynamically updated within the very same transaction.
 
 ### 3. Strict Validation & Security

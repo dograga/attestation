@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from google.cloud import firestore
 from dateutil.relativedelta import relativedelta
 from config import get_settings
-from models import AttestationSubmitPayload, AttestationApprovePayload
+from models import AttestationSubmitPayload, AttestationApprovePayload, AttestationDefinition
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -29,6 +29,61 @@ class FirestoreService:
         except Exception as e:
             logger.error("Failed to initialize Firestore client", error=str(e))
             self.client = None
+
+    async def create_definition(self, source_type: str, definition: AttestationDefinition) -> Dict[str, Any]:
+        """Create or update an attestation definition."""
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+            
+        def_ref = self.client.collection("attestation_definitions").document(source_type)
+        data = {
+            "cycle": definition.cycle,
+            "required_approvers": definition.required_approvers
+        }
+        await def_ref.set(data)
+        logger.info("Definition created", source_type=source_type)
+        return {"status": "success", "source_type": source_type, "data": data}
+
+    async def get_definition(self, source_type: str) -> Dict[str, Any]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        def_ref = self.client.collection("attestation_definitions").document(source_type)
+        doc = await def_ref.get()
+        if not doc.exists:
+            raise ValueError(f"Definition for {source_type} not found")
+        return doc.to_dict()
+
+    async def get_attestation(self, source_type: str, reference_id: str) -> Dict[str, Any]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        parent_id = f"{source_type}#{reference_id}"
+        parent_ref = self.client.collection("central_attestations").document(parent_id)
+        doc = await parent_ref.get()
+        if not doc.exists:
+            raise ValueError(f"Attestation {parent_id} not found")
+        return doc.to_dict()
+
+    async def get_attestation_history(self, source_type: str, reference_id: str, period_key: str) -> Dict[str, Any]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        parent_id = f"{source_type}#{reference_id}"
+        history_ref = self.client.collection("central_attestations").document(parent_id).collection("history").document(period_key)
+        doc = await history_ref.get()
+        if not doc.exists:
+            raise ValueError(f"History for {period_key} not found")
+        return doc.to_dict()
+
+    async def get_all_histories(self, source_type: str, reference_id: str) -> List[Dict[str, Any]]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        parent_id = f"{source_type}#{reference_id}"
+        history_ref = self.client.collection("central_attestations").document(parent_id).collection("history")
+        
+        histories = []
+        async for doc in history_ref.stream():
+            histories.append({"period_key": doc.id, **doc.to_dict()})
+            
+        return histories
 
     async def submit_attestation(self, source_type: str, payload: AttestationSubmitPayload) -> Dict[str, Any]:
         """Initiate or update a period_key with a dynamic payload."""
@@ -122,18 +177,20 @@ class FirestoreService:
             
             # Prevent upsert / enforce atomicity
             for existing_approval in approvals:
-                if existing_approval["approver_user"] == approval.approver_user and existing_approval["approver_group"] == approval.approver_group:
-                    raise ValueError(f"User {approval.approver_user} already approved for group {approval.approver_group}")
+                if existing_approval["approver_user"] == approval.approver_user and existing_approval["definition_role"] == approval.definition_role:
+                    raise ValueError(f"User {approval.approver_user} already approved for role {approval.definition_role}")
             
             new_approval = {
                 "approver_group": approval.approver_group,
+                "definition_role": approval.definition_role,
                 "approver_user": approval.approver_user,
                 "updated_on": datetime.utcnow()
             }
             approvals.append(new_approval)
             
-            approved_groups = set(a["approver_group"] for a in approvals)
-            is_completed = all(req_group in approved_groups for req_group in required_approvers)
+            # Use definition_role for the completion check instead of direct approver_group mapping
+            approved_roles = set(a["definition_role"] for a in approvals)
+            is_completed = all(req_role in approved_roles for req_role in required_approvers)
             
             history_update = {"approvals": approvals}
             if is_completed:

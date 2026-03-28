@@ -10,6 +10,7 @@ class AttestationDefinition(BaseModel):
 class Approval(BaseModel):
     """Schema for individual approval inside history"""
     approver_group: str
+    definition_role: str = Field(..., description="The role in the definition this group satisfies (e.g. 'app_lead')")
     approver_user: str
     updated_on: datetime
 
@@ -22,4 +23,5 @@ class AttestationSubmitPayload(BaseModel):
 class AttestationApprovePayload(BaseModel):
     """Payload for submitting an approval"""
     approver_group: str
+    definition_role: str = Field(..., description="The role in the definition this group satisfies (e.g. 'app_lead')")
     approver_user: str
