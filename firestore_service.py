@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from google.cloud import firestore
 from dateutil.relativedelta import relativedelta
 from config import get_settings
-from models import AttestationSubmitPayload, AttestationApprovePayload, AttestationDefinition
+from models import AttestationTaskPayload, AttestPayload, AttestationDefinition
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -85,12 +85,12 @@ class FirestoreService:
             
         return histories
 
-    async def submit_attestation(self, source_type: str, payload: AttestationSubmitPayload) -> Dict[str, Any]:
-        """Initiate or update a period_key with a dynamic payload."""
+    async def create_attestation_task(self, source_type: str, reference_id: str, payload: AttestationTaskPayload) -> Dict[str, Any]:
+        """Create a history task period initialized for an attestation."""
         if not self.client:
             raise FirestoreError("Firestore client not initialized")
 
-        parent_id = f"{source_type}#{payload.reference_id}"
+        parent_id = f"{source_type}#{reference_id}"
         period_key = payload.period_key
 
         def_ref = self.client.collection("attestation_definitions").document(source_type)
@@ -103,13 +103,11 @@ class FirestoreService:
 
         batch = self.client.batch()
 
-        # Update or create the parent
         parent_data = {
             "source_type": source_type,
-            "reference_id": payload.reference_id,
+            "reference_id": reference_id,
         }
         
-        # We also want to guarantee status is set if this is new
         parent_doc = await parent_ref.get()
         if not parent_doc.exists:
              parent_data["status"] = "PENDING"
@@ -123,7 +121,8 @@ class FirestoreService:
         
         if not history_doc.exists:
             history_data["attestation_status"] = "PENDING"
-            history_data["approvals"] = []
+            history_data["mandatory_attestators"] = payload.mandatory_attestators
+            history_data["attestations"] = []
             history_data["metadata_urls"] = []
             
         batch.set(history_ref, history_data, merge=True)
@@ -138,7 +137,6 @@ class FirestoreService:
         parent_id = f"{source_type}#{reference_id}"
         history_ref = self.client.collection("central_attestations").document(parent_id).collection("history").document(period_key)
         
-        # Check if exists
         history_doc = await history_ref.get()
         if not history_doc.exists:
             raise ValueError("History document does not exist for this period_key")
@@ -148,7 +146,7 @@ class FirestoreService:
         })
         return {"status": "success", "url": url}
 
-    async def approve_attestation(self, source_type: str, reference_id: str, period_key: str, approval: AttestationApprovePayload):
+    async def attest_task(self, source_type: str, reference_id: str, period_key: str, attestation: AttestPayload):
         if not self.client:
             raise FirestoreError("Firestore client not initialized")
             
@@ -165,34 +163,31 @@ class FirestoreService:
             if not def_doc.exists:
                 raise ValueError(f"Definition for {source_type} not found")
             definition = def_doc.to_dict()
-            required_approvers = definition.get("required_approvers", [])
             cycle = definition.get("cycle", "adhoc")
 
             history_doc = await history_ref.get(transaction=transaction)
             if not history_doc.exists:
                 raise ValueError(f"History doc for period {period_key} not found")
             history = history_doc.to_dict()
+            mandatory_attestators = history.get("mandatory_attestators", [])
             
-            approvals = history.get("approvals", [])
+            attestations = history.get("attestations", [])
             
-            # Prevent upsert / enforce atomicity
-            for existing_approval in approvals:
-                if existing_approval["approver_user"] == approval.approver_user and existing_approval["definition_role"] == approval.definition_role:
-                    raise ValueError(f"User {approval.approver_user} already approved for role {approval.definition_role}")
+            for existing in attestations:
+                if existing["attestator_user"] == attestation.attestator_user and existing["attestator_group"] == attestation.attestator_group:
+                    raise ValueError(f"User {attestation.attestator_user} already attested for group {attestation.attestator_group}")
             
-            new_approval = {
-                "approver_group": approval.approver_group,
-                "definition_role": approval.definition_role,
-                "approver_user": approval.approver_user,
+            new_record = {
+                "attestator_group": attestation.attestator_group,
+                "attestator_user": attestation.attestator_user,
                 "updated_on": datetime.utcnow()
             }
-            approvals.append(new_approval)
+            attestations.append(new_record)
             
-            # Use definition_role for the completion check instead of direct approver_group mapping
-            approved_roles = set(a["definition_role"] for a in approvals)
-            is_completed = all(req_role in approved_roles for req_role in required_approvers)
+            approved_groups = set(a["attestator_group"] for a in attestations)
+            is_completed = all(req_group in approved_groups for req_group in mandatory_attestators)
             
-            history_update = {"approvals": approvals}
+            history_update = {"attestations": attestations}
             if is_completed:
                 history_update["attestation_status"] = "COMPLETED"
                 

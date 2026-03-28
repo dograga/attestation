@@ -1,64 +1,41 @@
 import pytest
 from datetime import datetime
-from models import AttestationApprovePayload
-from firestore_service import FirestoreService
+from models import AttestPayload
 
-def check_approval_logic(approvals_list, required_approvers, new_approval):
-    # Mimics the logic inside the Firestore transaction
-    for existing in approvals_list:
-        if existing["approver_user"] == new_approval.approver_user and existing["definition_role"] == new_approval.definition_role:
-            raise ValueError(f"User {new_approval.approver_user} already approved for role {new_approval.definition_role}")
+def check_attestation_logic(attestations_list, mandatory_attestators, new_attestation):
+    for existing in attestations_list:
+        if existing["attestator_user"] == new_attestation.attestator_user and existing["attestator_group"] == new_attestation.attestator_group:
+            raise ValueError(f"User {new_attestation.attestator_user} already attested for group {new_attestation.attestator_group}")
             
     new_record = {
-        "approver_group": new_approval.approver_group,
-        "definition_role": new_approval.definition_role,
-        "approver_user": new_approval.approver_user,
+        "attestator_group": new_attestation.attestator_group,
+        "attestator_user": new_attestation.attestator_user,
         "updated_on": datetime.utcnow()
     }
-    approvals_list.append(new_record)
+    attestations_list.append(new_record)
     
-    approved_roles = set(a["definition_role"] for a in approvals_list)
-    is_completed = all(req_role in approved_roles for req_role in required_approvers)
+    approved_groups = set(a["attestator_group"] for a in attestations_list)
+    is_completed = all(req_group in approved_groups for req_group in mandatory_attestators)
     
-    return is_completed, approvals_list
+    return is_completed, attestations_list
 
-def test_approval_logic_success():
-    approvals = []
-    required = ["app_lead", "gcp_lead"]
+def test_attestation_logic_success():
+    attestations = []
+    required = ["app_lead_marketing", "gcp_lead_infrastructure"]
     
-    # 1. First group approval (still PENDING)
-    comp, apps = check_approval_logic(approvals, required, AttestationApprovePayload(approver_group="app_lead_marketing", definition_role="app_lead", approver_user="user1"))
+    comp, apps = check_attestation_logic(attestations, required, AttestPayload(attestator_group="app_lead_marketing", attestator_user="user1"))
     assert not comp
     assert len(apps) == 1
     
-    # 2. Second group approval (Completes the attestation)
-    comp, apps = check_approval_logic(approvals, required, AttestationApprovePayload(approver_group="gcp_lead_marketing", definition_role="gcp_lead", approver_user="user2"))
+    comp, apps = check_attestation_logic(attestations, required, AttestPayload(attestator_group="gcp_lead_infrastructure", attestator_user="user2"))
     assert comp
     assert len(apps) == 2
 
-def test_approval_logic_no_upsert():
-    approvals = []
-    required = ["app_lead", "gcp_lead"]
+def test_attestation_logic_no_upsert():
+    attestations = []
+    required = ["app_lead_marketing", "gcp_lead_infrastructure"]
     
-    # 1. Approve
-    check_approval_logic(approvals, required, AttestationApprovePayload(approver_group="app_lead_marketing", definition_role="app_lead", approver_user="user1"))
+    check_attestation_logic(attestations, required, AttestPayload(attestator_group="app_lead_marketing", attestator_user="user1"))
     
-    # 2. Upsert block test (atomicity emulation)
-    with pytest.raises(ValueError, match="already approved for role app_lead"):
-        check_approval_logic(approvals, required, AttestationApprovePayload(approver_group="another_group", definition_role="app_lead", approver_user="user1"))
-
-def test_add_multiple_images_logic():
-    # Emulate arrayUnion behavior since we mock the DB client in tests or rely on firestore emulator
-    metadata_urls = []
-    
-    def array_union(new_item):
-        if new_item not in metadata_urls:
-            metadata_urls.append(new_item)
-            
-    array_union("http://gcs-signed-url-1")
-    array_union("http://gcs-signed-url-2")
-    array_union("http://gcs-signed-url-1") # Should not duplicate
-    
-    assert len(metadata_urls) == 2
-    assert "http://gcs-signed-url-1" in metadata_urls
-    assert "http://gcs-signed-url-2" in metadata_urls
+    with pytest.raises(ValueError, match="already attested for group"):
+        check_attestation_logic(attestations, required, AttestPayload(attestator_group="app_lead_marketing", attestator_user="user1"))

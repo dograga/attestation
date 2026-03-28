@@ -7,21 +7,19 @@ class AttestationDefinition(BaseModel):
     cycle: str = Field(..., description="monthly | yearly | quarterly | adhoc")
     required_approvers: List[str] = Field(..., description="List of required approver groups")
 
-class Approval(BaseModel):
-    """Schema for individual approval inside history"""
-    approver_group: str
-    definition_role: str = Field(..., description="The role in the definition this group satisfies (e.g. 'app_lead')")
-    approver_user: str
+class AttestationRecord(BaseModel):
+    """Schema for individual attestation inside history"""
+    attestator_group: str
+    attestator_user: str
     updated_on: datetime
 
-class AttestationSubmitPayload(BaseModel):
-    """Payload to initiate or update an attestation submission"""
-    reference_id: str = Field(..., description="Reference ID for the attestation (e.g., EX-9912)")
+class AttestationTaskPayload(BaseModel):
+    """Payload to initiate or update an attestation task for a period"""
     period_key: str = Field(..., description="Period key for the execution (e.g., 2026)")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Dynamic payload for specific data")
+    mandatory_attestators: List[str] = Field(..., description="List of exact explicit groups required for attestation")
 
-class AttestationApprovePayload(BaseModel):
-    """Payload for submitting an approval"""
-    approver_group: str
-    definition_role: str = Field(..., description="The role in the definition this group satisfies (e.g. 'app_lead')")
-    approver_user: str
+class AttestPayload(BaseModel):
+    """Payload for submitting an attestation"""
+    attestator_group: str
+    attestator_user: str

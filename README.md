@@ -51,11 +51,11 @@ erDiagram
 
 ## API Endpoints Overview
 
-1. `POST /api/v1/attestations/{source_type}`
-   - **Purpose**: Initiate or Update an attestation with a dynamic payload.
+1. `POST /api/v1/attestations/{source_type}/{reference_id}/tasks`
+   - **Purpose**: Initialize a new history task period strictly defining its `mandatory_attestators`. Can be automatically invoked by cron triggers.
    
 2. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/evidence`
    - **Purpose**: Upload physical evidence files, directly push to GCS, and bind the accessible Signed URL to the history document.
 
-3. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/approve`
-   - **Purpose**: Registers approvals transactionally in the execution history and evaluates completion state.
+3. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/attest`
+   - **Purpose**: Registers attestations transactionally in the execution history and evaluates completion state natively against the period's requirement blueprint.

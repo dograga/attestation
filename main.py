@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime
 
 from config import get_settings
-from models import AttestationSubmitPayload, AttestationApprovePayload, AttestationDefinition
+from models import AttestationTaskPayload, AttestPayload, AttestationDefinition
 from firestore_service import firestore_service, FirestoreError
 from storage_service import storage_service
 
@@ -41,6 +41,10 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={"error": "Internal Server Error", "message": str(exc) if settings.debug else "An unexpected error occurred"}
     )
 
+@app.get("/health", tags=["General"])
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
 @app.get("/api/v1/definitions/{source_type}", tags=["Definitions"])
 async def get_definition(source_type: str):
     """Fetch an Attestation Definition."""
@@ -65,18 +69,18 @@ async def create_definition(source_type: str, payload: AttestationDefinition):
         logger.error("Definition creation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/attestations/{source_type}", tags=["Attestations"])
-async def submit_attestation(source_type: str, payload: AttestationSubmitPayload):
+@app.post("/api/v1/attestations/{source_type}/{reference_id}/tasks", tags=["Tasks"])
+async def create_attestation_task(source_type: str, reference_id: str, payload: AttestationTaskPayload):
     """
-    Initiate or update a period_key with a dynamic payload.
+    Initialize a new history task period for an attestation. (Can be called by chron-job)
     """
     try:
-        result = await firestore_service.submit_attestation(source_type, payload)
+        result = await firestore_service.create_attestation_task(source_type, reference_id, payload)
         return {"status": "success", "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error("Submission failed", error=str(e))
+        logger.error("Task creation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/attestations/{source_type}/{reference_id}", tags=["Attestations"])
@@ -131,18 +135,18 @@ async def get_attestation_history(source_type: str, reference_id: str, period_ke
         logger.error("Failed to fetch history", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/attestations/{source_type}/{reference_id}/{period_key}/approve", tags=["Approvals"])
-async def approve_attestation(source_type: str, reference_id: str, period_key: str, payload: AttestationApprovePayload):
+@app.post("/api/v1/attestations/{source_type}/{reference_id}/{period_key}/attest", tags=["Attestations"])
+async def attest_task(source_type: str, reference_id: str, period_key: str, payload: AttestPayload):
     """
-    Approve an attestation. Update approvals array atomically and check for completion.
+    Attest a task. Update attestations array atomically and check for completion.
     """
     try:
-        result = await firestore_service.approve_attestation(source_type, reference_id, period_key, payload)
+        result = await firestore_service.attest_task(source_type, reference_id, period_key, payload)
         return {"status": "success", "data": result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("Approval failed", error=str(e))
+        logger.error("Attestation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health", tags=["General"])
