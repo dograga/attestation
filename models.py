@@ -13,10 +13,15 @@ class AttestationRecord(BaseModel):
     attestator_user: str
     updated_on: datetime
 
+class AttestationReferencePayload(BaseModel):
+    """Payload to create a new central attestation reference"""
+    source_type: str = Field(..., description="Source type matching a definition")
+    reference_id: str = Field(..., description="Unique reference ID for this attestation (e.g., EX-9912)")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Static payload for the central reference")
+
 class AttestationTaskPayload(BaseModel):
     """Payload to initiate or update an attestation task for a period"""
-    period_key: str = Field(..., description="Period key for the execution (e.g., 2026)")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="Dynamic payload for specific data")
+    period_key: str = Field(..., description="Period key for the execution (e.g., 2026-03)")
     mandatory_attestators: List[str] = Field(..., description="List of exact explicit groups required for attestation")
 
 class AttestPayload(BaseModel):

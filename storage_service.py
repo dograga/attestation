@@ -13,7 +13,10 @@ class StorageService:
         
     def _initialize_client(self):
         try:
-            self.client = storage.Client()
+            if settings.firestore_project_id:
+                self.client = storage.Client(project=settings.firestore_project_id)
+            else:
+                self.client = storage.Client()
             logger.info("Storage client initialized")
         except Exception as e:
             logger.error("Failed to initialize Storage client", error=str(e))

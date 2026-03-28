@@ -51,11 +51,14 @@ erDiagram
 
 ## API Endpoints Overview
 
-1. `POST /api/v1/attestations/{source_type}/{reference_id}/tasks`
-   - **Purpose**: Initialize a new history task period strictly defining its `mandatory_attestators`. Can be automatically invoked by cron triggers.
+1. `POST /api/v1/attestations`
+   - **Purpose**: Creates the central ledger reference document initialized with a base structure and state. Must be done once per `source_type` and `reference_id` combined key prior to executing task arrays.
+
+2. `POST /api/v1/attestations/{source_type}/{reference_id}/tasks`
+   - **Purpose**: Initialize a new history task period strictly defining its `mandatory_attestators` list (like `"2026-03"`). Bound strictly to a created parent reference.
    
-2. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/evidence`
+3. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/evidence`
    - **Purpose**: Upload physical evidence files, directly push to GCS, and bind the accessible Signed URL to the history document.
 
-3. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/attest`
+4. `POST /api/v1/attestations/{source_type}/{reference_id}/{period_key}/attest`
    - **Purpose**: Registers attestations transactionally in the execution history and evaluates completion state natively against the period's requirement blueprint.

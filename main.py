@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime
 
 from config import get_settings
-from models import AttestationTaskPayload, AttestPayload, AttestationDefinition
+from models import AttestationTaskPayload, AttestPayload, AttestationDefinition, AttestationReferencePayload
 from firestore_service import firestore_service, FirestoreError
 from storage_service import storage_service
 
@@ -45,6 +45,16 @@ async def general_exception_handler(request: Request, exc: Exception):
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+@app.get("/api/v1/definitions", tags=["Definitions"])
+async def list_definitions():
+    """List all Attestation Definitions."""
+    try:
+        result = await firestore_service.list_definitions()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        logger.error("Failed to list definitions", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/definitions/{source_type}", tags=["Definitions"])
 async def get_definition(source_type: str):
     """Fetch an Attestation Definition."""
@@ -69,10 +79,24 @@ async def create_definition(source_type: str, payload: AttestationDefinition):
         logger.error("Definition creation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/v1/attestations", tags=["Attestations"])
+async def create_attestation_reference(payload: AttestationReferencePayload):
+    """
+    Create the central ledger / parent reference document holding the primary payload for an attestation.
+    """
+    try:
+        result = await firestore_service.create_attestation_reference(payload)
+        return {"status": "success", "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Reference creation failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/v1/attestations/{source_type}/{reference_id}/tasks", tags=["Tasks"])
 async def create_attestation_task(source_type: str, reference_id: str, payload: AttestationTaskPayload):
     """
-    Initialize a new history task period for an attestation. (Can be called by chron-job)
+    Initialize a new history task period strictly for an active reference.
     """
     try:
         result = await firestore_service.create_attestation_task(source_type, reference_id, payload)
@@ -81,6 +105,16 @@ async def create_attestation_task(source_type: str, reference_id: str, payload: 
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Task creation failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/attestations", tags=["Attestations"])
+async def list_attestations():
+    """List all central attestation ledgers."""
+    try:
+        result = await firestore_service.list_attestations()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        logger.error("Failed to list attestations", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/attestations/{source_type}/{reference_id}", tags=["Attestations"])

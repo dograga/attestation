@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from google.cloud import firestore
 from dateutil.relativedelta import relativedelta
 from config import get_settings
-from models import AttestationTaskPayload, AttestPayload, AttestationDefinition
+from models import AttestationTaskPayload, AttestPayload, AttestationDefinition, AttestationReferencePayload
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -44,6 +44,14 @@ class FirestoreService:
         logger.info("Definition created", source_type=source_type)
         return {"status": "success", "source_type": source_type, "data": data}
 
+    async def list_definitions(self) -> List[Dict[str, Any]]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        defs = []
+        async for doc in self.client.collection("attestation_definitions").stream():
+            defs.append({"source_type": doc.id, **doc.to_dict()})
+        return defs
+
     async def get_definition(self, source_type: str) -> Dict[str, Any]:
         if not self.client:
             raise FirestoreError("Firestore client not initialized")
@@ -52,6 +60,14 @@ class FirestoreService:
         if not doc.exists:
             raise ValueError(f"Definition for {source_type} not found")
         return doc.to_dict()
+
+    async def list_attestations(self) -> List[Dict[str, Any]]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        atts = []
+        async for doc in self.client.collection("central_attestations").stream():
+            atts.append({"id": doc.id, **doc.to_dict()})
+        return atts
 
     async def get_attestation(self, source_type: str, reference_id: str) -> Dict[str, Any]:
         if not self.client:
@@ -85,48 +101,54 @@ class FirestoreService:
             
         return histories
 
+    async def create_attestation_reference(self, payload: AttestationReferencePayload) -> Dict[str, Any]:
+        if not self.client:
+            raise FirestoreError("Firestore client not initialized")
+        
+        def_ref = self.client.collection("attestation_definitions").document(payload.source_type)
+        if not (await def_ref.get()).exists:
+            raise ValueError(f"Definition for {payload.source_type} does not exist.")
+            
+        parent_id = f"{payload.source_type}#{payload.reference_id}"
+        parent_ref = self.client.collection("central_attestations").document(parent_id)
+        
+        if (await parent_ref.get()).exists:
+            raise ValueError(f"Attestation reference {payload.reference_id} already exists.")
+            
+        data = {
+            "source_type": payload.source_type,
+            "reference_id": payload.reference_id,
+            "status": "PENDING",
+            "payload": payload.payload
+        }
+        await parent_ref.set(data)
+        return {"status": "success", "parent_id": parent_id, "data": data}
+
     async def create_attestation_task(self, source_type: str, reference_id: str, payload: AttestationTaskPayload) -> Dict[str, Any]:
         """Create a history task period initialized for an attestation."""
         if not self.client:
             raise FirestoreError("Firestore client not initialized")
 
         parent_id = f"{source_type}#{reference_id}"
-        period_key = payload.period_key
-
-        def_ref = self.client.collection("attestation_definitions").document(source_type)
-        def_doc = await def_ref.get()
-        if not def_doc.exists:
-            raise ValueError(f"Definition for {source_type} does not exist.")
-
         parent_ref = self.client.collection("central_attestations").document(parent_id)
-        history_ref = parent_ref.collection("history").document(period_key)
-
-        batch = self.client.batch()
-
-        parent_data = {
-            "source_type": source_type,
-            "reference_id": reference_id,
-        }
         
-        parent_doc = await parent_ref.get()
-        if not parent_doc.exists:
-             parent_data["status"] = "PENDING"
-        
-        batch.set(parent_ref, parent_data, merge=True)
-
-        history_doc = await history_ref.get()
-        history_data = {
-            "payload": payload.payload,
-        }
-        
-        if not history_doc.exists:
-            history_data["attestation_status"] = "PENDING"
-            history_data["mandatory_attestators"] = payload.mandatory_attestators
-            history_data["attestations"] = []
-            history_data["metadata_urls"] = []
+        if not (await parent_ref.get()).exists:
+            raise ValueError(f"Attestation reference {reference_id} does not exist. Create the reference first.")
             
-        batch.set(history_ref, history_data, merge=True)
-        await batch.commit()
+        period_key = payload.period_key
+        history_ref = parent_ref.collection("history").document(period_key)
+        
+        if (await history_ref.get()).exists:
+             raise ValueError(f"Task for period {period_key} already exists.")
+             
+        history_data = {
+            "attestation_status": "PENDING",
+            "mandatory_attestators": payload.mandatory_attestators,
+            "attestations": [],
+            "metadata_urls": []
+        }
+        
+        await history_ref.set(history_data)
 
         return {"status": "success", "parent_id": parent_id, "period_key": period_key}
 
