@@ -102,7 +102,8 @@ async def create_attestation_task(source_type: str, reference_id: str, payload: 
         result = await firestore_service.create_attestation_task(source_type, reference_id, payload)
         return {"status": "success", "data": result}
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        status_code = 409 if "already exists" in str(e).lower() else 404
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         logger.error("Task creation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

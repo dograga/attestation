@@ -2,6 +2,7 @@ import structlog
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from google.cloud import firestore
+from google.api_core.exceptions import AlreadyExists
 from dateutil.relativedelta import relativedelta
 from config import get_settings
 from models import AttestationTaskPayload, AttestPayload, AttestationDefinition, AttestationReferencePayload
@@ -112,16 +113,19 @@ class FirestoreService:
         parent_id = f"{payload.source_type}#{payload.reference_id}"
         parent_ref = self.client.collection("central_attestations").document(parent_id)
         
-        if (await parent_ref.get()).exists:
-            raise ValueError(f"Attestation reference {payload.reference_id} already exists.")
-            
         data = {
             "source_type": payload.source_type,
             "reference_id": payload.reference_id,
             "status": "PENDING",
             "payload": payload.payload
         }
-        await parent_ref.set(data)
+        
+        # Native Firestore atomic lock against concurrent creations
+        try:
+            await parent_ref.create(data)
+        except AlreadyExists:
+            raise ValueError(f"Attestation reference {payload.reference_id} already exists.")
+            
         return {"status": "success", "parent_id": parent_id, "data": data}
 
     async def create_attestation_task(self, source_type: str, reference_id: str, payload: AttestationTaskPayload) -> Dict[str, Any]:
@@ -138,9 +142,6 @@ class FirestoreService:
         period_key = payload.period_key
         history_ref = parent_ref.collection("history").document(period_key)
         
-        if (await history_ref.get()).exists:
-             raise ValueError(f"Task for period {period_key} already exists.")
-             
         history_data = {
             "attestation_status": "PENDING",
             "mandatory_attestators": payload.mandatory_attestators,
@@ -148,7 +149,11 @@ class FirestoreService:
             "metadata_urls": []
         }
         
-        await history_ref.set(history_data)
+        # Native Firestore atomic lock against concurrent timeline assignments
+        try:
+            await history_ref.create(history_data)
+        except AlreadyExists:
+             raise ValueError(f"Task for period {period_key} already exists.")
 
         return {"status": "success", "parent_id": parent_id, "period_key": period_key}
 
