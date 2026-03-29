@@ -21,6 +21,7 @@ erDiagram
         string source_type
         string reference_id
         string status "PENDING | COMPLETED"
+        map payload "Dynamic Dict for use-case"
         timestamp last_attested
         timestamp next_cycle_due
     }
@@ -28,21 +29,21 @@ erDiagram
     history {
         string doc_id "period_key e.g., 2026"
         string attestation_status "PENDING | COMPLETED"
+        list mandatory_attestators "e.g., exact groups snapshotted at task creation"
         list metadata_urls "GCS Signed URLs"
-        map payload "Dynamic Dict for use-case"
-        list approvals "JSON list of {approver_group, definition_role, approver_user, updated_on}"
+        list attestations "JSON list of {attestator_group, attestator_user, updated_on}"
     }
 ```
 
 ## Engineering Constraints & Safeguards Implemented
 
 ### 1. Atomicity & Concurrency Control
-- **Firestore Transactions:** The multi-party approval logic validates the incoming approval payload in a strictly isolated **Firestore Transaction**.
-- **No-Upsert Guarantee:** Within the transaction footprint, the service actively parses the `approvals` array to ensure a specific user cannot submit multiple redundant approvals for the exact same group. This guards against data duplication and unintentional upserts.
+- **Firestore Transactions:** The multi-party attestation logic validates the incoming attestation payload in a strictly isolated **Firestore Transaction**.
+- **No-Upsert Guarantee:** Within the transaction footprint, the service actively parses the `attestations` array to ensure a specific user cannot submit multiple redundant attestations for the exact same group. This guards against data duplication and unintentional upserts.
 - **ArrayUnion Updates:** Image evidence URL additions (`metadata_urls`) use atomic `ArrayUnion` operations so that simultaneous uploads by multiple clients never overwrite each other.
 
 ### 2. State Syncing
-- Once all unique `definition_role` entries from the approvals match the `required_approvers` prescribed in the Definitions schema, the transaction atomically transitions the Execution state (`attestation_status`) to `COMPLETED`. This decouples the actual Azure/GCP Group (`approver_group`) from the required definition block (`definition_role`), allowing frontends to dynamically translate roles to explicit groups.
+- Once all unique `attestator_group` entries from the `attestations` array match the snapshotted `mandatory_attestators` prescribed in the `history` task, the transaction atomically transitions the Execution state (`attestation_status`) to `COMPLETED`. This ensures that mandatory approver groups are securely decoupled and snapshotted at the task level during initiation.
 - The parent (`central_attestations`) status, `last_attested`, and structurally calculated `next_cycle_due` (monthly/quarterly/yearly base calculation) are dynamically updated within the very same transaction.
 
 ### 3. Strict Validation & Security
